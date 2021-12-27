@@ -72,23 +72,23 @@ public:
         auto selectedRecipients = recipient.results(origin);
 
         if (selectedSources.empty() || selectedRecipients.empty()) {
-            return output.error("No targets matched source selector");
+            return output.error("No targets matched selector");
         }
-        if (selectedSources.count() > 1 || selectedRecipients.count() > 1) {
+        if (selectedSources.count() > 1) {
             return output.error("Too many targets matched source selector");
         }
 
         auto& sourcePlayer = *selectedSources.begin();
-        auto& recipientPlayer = *selectedRecipients.begin();
 
-        if (sourcePlayer == recipientPlayer) {
-            return output.error("Source and recipient must be unique");
+        for (auto tempRecipient : selectedRecipients) {
+            if (sourcePlayer != tempRecipient) {
+                copy(sourcePlayer, tempRecipient, output);
+            }
         }
 
-        copy(sourcePlayer, recipientPlayer, output);
-
-        output.success(
-            "Successfully copied the " + std::string(containerTypeToString(type)) + " contents from " + sourcePlayer->mPlayerName + " to " + recipientPlayer->mPlayerName);
+        int resultCount = selectedRecipients.count();
+        std::string successStr = "Successfully copied the " + std::string(containerTypeToString(type)) + " contents from " + sourcePlayer->mPlayerName + " to " + std::to_string(resultCount) + std::string(resultCount == 1 ? " player" : " players");
+        output.success(successStr);
     }
 
     static void setup(CommandRegistry *registry) {
