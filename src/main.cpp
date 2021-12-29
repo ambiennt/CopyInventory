@@ -6,8 +6,10 @@ public:
     CopyInventoryCommand() {
         source.setIncludeDeadPlayers(true);
         recipient.setIncludeDeadPlayers(true);
-        source.setResultCount(1);
-        recipient.setResultCount(1);
+        // this works but automatically chooses the first element in the result vector. we want to be able to dynamically
+        // respond to result counts, so we can throw unique errors for each type of user error
+        //source.setResultCount(1);
+        //recipient.setResultCount(1);
     }
 
     CommandSelector<Player> source;
