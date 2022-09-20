@@ -72,8 +72,12 @@ void CopyInventoryCommand::execute(const CommandOrigin &origin, CommandOutput &o
 	auto selectedSources = this->source.results(origin);
 	auto selectedRecipients = this->recipient.results(origin);
 
-	if (selectedSources.empty() || selectedRecipients.empty()) {
-		output.error("No targets matched either selector");
+	if (selectedSources.empty()) {
+		output.error("No targets matched source selector");
+		return;
+	}
+	if (selectedRecipients.empty()) {
+		output.error("No targets matched recipient selector");
 		return;
 	}
 	if (selectedSources.count() > 1) {
@@ -130,8 +134,12 @@ void CopyMainhandItemCommand::execute(const CommandOrigin &origin, CommandOutput
 	auto selectedSources = this->source.results(origin);
 	auto selectedRecipients = this->recipient.results(origin);
 
-	if (selectedSources.empty() || selectedRecipients.empty()) {
-		output.error("No targets matched either selector");
+	if (selectedSources.empty()) {
+		output.error("No targets matched source selector");
+		return;
+	}
+	if (selectedRecipients.empty()) {
+		output.error("No targets matched recipient selector");
 		return;
 	}
 	if (selectedSources.count() > 1) {
@@ -140,15 +148,15 @@ void CopyMainhandItemCommand::execute(const CommandOrigin &origin, CommandOutput
 	}
 
 	auto sourcePlayer = *selectedSources.begin();
+
 	if (!sourcePlayer->getSelectedItem()) {
 		output.error("Invalid item in source selector mainhand");
 		return;
 	}
 
+	// intentionally allow players to copy their own item and give to themselves, why not?
 	for (auto tempRecipient : selectedRecipients) {
-		if (sourcePlayer != tempRecipient) {
-			this->copyMainhandItem(*sourcePlayer, *tempRecipient, output);
-		}
+		this->copyMainhandItem(*sourcePlayer, *tempRecipient, output);
 	}
 
 	int32_t resultCount = selectedRecipients.count();
