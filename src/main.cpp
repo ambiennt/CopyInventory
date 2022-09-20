@@ -1,119 +1,171 @@
 #include "main.h"
 #include <dllentry.h>
 
-class CopyInventoryCommand : public Command {
-public:
-    CopyInventoryCommand() {
-        source.setIncludeDeadPlayers(true);
-        recipient.setIncludeDeadPlayers(true);
-        // this works but automatically chooses the first element in the result vector. we want to be able to dynamically
-        // respond to result counts, so we can throw unique errors for each type of user error
-        //source.setResultCount(1);
-        //recipient.setResultCount(1);
-    }
-
-    CommandSelector<Player> source;
-    CommandSelector<Player> recipient;
-    enum class ContainerType { inventory, enderchest } type = ContainerType::inventory;
-
-    constexpr const char* containerTypeToString(ContainerType k) {
-        switch (k) {
-            case ContainerType::inventory:  return "inventory";
-            case ContainerType::enderchest: return "ender chest";
-            default:                        return "unknown";
-        }
-    }
-
-    void copy(Player *sourcePlayer, Player *recipientPlayer, CommandOutput &output) {
-
-        switch (type) {
-            case ContainerType::inventory:
-                {
-                    auto sourcePlayerInventory = sourcePlayer->mInventory->inventory.get();
-                    auto recipientPlayerInventory = recipientPlayer->mInventory->inventory.get();
-
-                    for (int i = 0; i < 4; i++) {
-                        ItemStack armorCopy(sourcePlayer->getArmor((ArmorSlot) i));
-                        recipientPlayer->setArmor((ArmorSlot) i, armorCopy);
-                    }
-
-                    ItemStack offhandCopy(*sourcePlayer->getOffhandSlot());
-                    recipientPlayer->setOffhandSlot(offhandCopy);
-
-                    for (int i = 0; i < recipientPlayerInventory->getContainerSize(); i++) {
-                        ItemStack inventoryCopy(sourcePlayerInventory->getItem(i));
-                        recipientPlayerInventory->setItem(i, inventoryCopy);
-                    }
-
-                    ItemStack UIItemCopy(sourcePlayer->getPlayerUIItem());
-                    recipientPlayer->setPlayerUIItem(PlayerUISlot::CursorSelected, UIItemCopy);
-
-                    recipientPlayer->sendInventory(false);
-                }
-                break;
-
-            case ContainerType::enderchest:
-                {
-                    auto sourceEnderChest = sourcePlayer->getEnderChestContainer();
-                    auto recipientEnderChest = recipientPlayer->getEnderChestContainer();
-
-                    for (int i = 0; i < recipientEnderChest->getContainerSize(); i++) {
-                        ItemStack enderChestCopy(sourceEnderChest->getItem(i));
-                        recipientEnderChest->setItem(i, enderChestCopy);
-                    }
-                }
-                break;
-
-            default: break;
-        }
-    }
-
-    void execute(CommandOrigin const &origin, CommandOutput &output) {
-
-        auto selectedSources = source.results(origin);
-        auto selectedRecipients = recipient.results(origin);
-
-        if (selectedSources.empty() || selectedRecipients.empty()) {
-            return output.error("No targets matched selector");
-        }
-        if (selectedSources.count() > 1) {
-            return output.error("Too many targets matched source selector");
-        }
-
-        auto& sourcePlayer = *selectedSources.begin();
-
-        for (auto tempRecipient : selectedRecipients) {
-            if (sourcePlayer != tempRecipient) {
-                copy(sourcePlayer, tempRecipient, output);
-            }
-        }
-
-        int resultCount = selectedRecipients.count();
-        std::string successStr = "Successfully copied the " + std::string(containerTypeToString(type)) + " contents from " + sourcePlayer->mPlayerName + " to " + std::to_string(resultCount) + std::string(resultCount == 1 ? " player" : " players");
-        output.success(successStr);
-    }
-
-    static void setup(CommandRegistry *registry) {
-        using namespace commands;
-        registry->registerCommand(
-            "copyinventory", "Copies a player's inventory or ender chest contents.", CommandPermissionLevel::GameMasters, CommandFlagNone, CommandFlagNone);
-
-        commands::addEnum<ContainerType>(registry, "ContainerType", {
-            { "inventory", ContainerType::inventory },
-            { "enderchest", ContainerType::enderchest }
-        });
-
-        registry->registerOverload<CopyInventoryCommand>("copyinventory",
-            mandatory(&CopyInventoryCommand::source, "source"),
-            mandatory(&CopyInventoryCommand::recipient, "recipient"),
-            optional<CommandParameterDataType::ENUM>(&CopyInventoryCommand::type, "type", "ContainerType")
-        );
-    }
-};
-
 void dllenter() {}
 void dllexit() {}
 void PreInit() {
-    Mod::CommandSupport::GetInstance().AddListener(SIG("loaded"), &CopyInventoryCommand::setup);
+	Mod::CommandSupport::GetInstance().AddListener(SIG("loaded"), &CopyItemUtils::initializeCopyItemCommands);
 }
 void PostInit() {}
+
+void CopyItemUtils::initializeCopyItemCommands(CommandRegistry *registry) {
+	CopyInventoryCommand::setup(registry);
+	CopyMainhandItemCommand::setup(registry);
+}
+
+std::string CopyInventoryCommand::containerTypeToString(DestinationContainerType k) {
+	switch (k) {
+		case DestinationContainerType::Inventory: return std::string("inventory");
+		case DestinationContainerType::Enderchest: return std::string("ender chest");
+		default: return std::string("unknown");
+	}
+}
+
+void CopyInventoryCommand::copyFullInventory(Player &sourcePlayer, Player &recipientPlayer, CommandOutput &output) {
+
+	switch (this->type) {
+		case DestinationContainerType::Inventory: {
+
+			const auto& sourceInventory = sourcePlayer.getRawInventory();
+			auto& recipientInventory = recipientPlayer.getRawInventory();
+
+			const int32_t PLAYER_ARMOR_SLOT_COUNT = 4;
+			for (int32_t i = 0; i < PLAYER_ARMOR_SLOT_COUNT; i++) {
+				ItemStack armorCopy(sourcePlayer.getArmor((ArmorSlot)i));
+				recipientPlayer.setArmor((ArmorSlot)i, armorCopy);
+			}
+
+			ItemStack offhandCopy(sourcePlayer.getOffhandSlot());
+			recipientPlayer.setOffhandSlot(offhandCopy);
+
+			for (int32_t i = 0; i < recipientInventory.getContainerSize(); i++) {
+				ItemStack inventoryCopy(sourceInventory.getItem(i));
+				recipientInventory.setItem(i, inventoryCopy);
+			}
+
+			ItemStack UIItemCopy(sourcePlayer.getPlayerUIItem());
+			recipientPlayer.setPlayerUIItem(PlayerUISlot::CursorSelected, UIItemCopy);
+
+			recipientPlayer.sendInventory(false);
+			break;
+		}
+
+		case DestinationContainerType::Enderchest: {
+
+			auto sourceEnderChest = sourcePlayer.getEnderChestContainer();
+			if (!sourceEnderChest) break;
+			auto recipientEnderChest = recipientPlayer.getEnderChestContainer();
+			if (!recipientEnderChest) break;
+
+			for (int32_t i = 0; i < recipientEnderChest->getContainerSize(); i++) {
+				ItemStack enderChestCopy(sourceEnderChest->getItem(i));
+				recipientEnderChest->setItem(i, enderChestCopy);
+			}
+			break;
+		}
+		default: break;
+	}
+}
+
+void CopyInventoryCommand::execute(const CommandOrigin &origin, CommandOutput &output) {
+
+	auto selectedSources = this->source.results(origin);
+	auto selectedRecipients = this->recipient.results(origin);
+
+	if (selectedSources.empty() || selectedRecipients.empty()) {
+		output.error("No targets matched either selector");
+		return;
+	}
+	if (selectedSources.count() > 1) {
+		output.error("Too many targets matched source selector");
+		return;
+	}
+
+	auto sourcePlayer = *selectedSources.begin();
+
+	for (auto tempRecipient : selectedRecipients) {
+		if (sourcePlayer != tempRecipient) {
+			this->copyFullInventory(*sourcePlayer, *tempRecipient, output);
+		}
+	}
+
+	int32_t resultCount = selectedRecipients.count();
+	std::string successStr = "Successfully copied the " + this->containerTypeToString(this->type) + " contents from " +
+		sourcePlayer->mPlayerName + " to " + std::to_string(resultCount) + std::string((resultCount == 1) ? " player" : " players");
+	output.success(successStr);
+}
+
+void CopyInventoryCommand::setup(CommandRegistry *registry) {
+	using namespace commands;
+
+	registry->registerCommand("copyinventory", "Copies a player's full inventory or ender chest contents.",
+		CommandPermissionLevel::GameMasters, CommandFlagUsage, CommandFlagNone);
+
+	addEnum<DestinationContainerType>(registry, "containerType", {
+		{ "inventory", DestinationContainerType::Inventory },
+		{ "enderchest", DestinationContainerType::Enderchest }
+	});
+
+	registry->registerOverload<CopyInventoryCommand>("copyinventory",
+		mandatory(&CopyInventoryCommand::source, "source"),
+		mandatory(&CopyInventoryCommand::recipient, "recipient"),
+		optional<CommandParameterDataType::ENUM>(&CopyInventoryCommand::type, "destination", "containerType")
+	);
+};
+
+void CopyMainhandItemCommand::copyMainhandItem(Player &sourcePlayer, Player &recipientPlayer, CommandOutput &output) {
+
+	ItemStack sourceItemCopy(sourcePlayer.getSelectedItem());
+
+	if (recipientPlayer.add(sourceItemCopy)) {
+		recipientPlayer.sendInventory(false);
+	}
+	else if (this->dropItemIfNeeded) {
+		recipientPlayer.drop(sourceItemCopy, false);
+	}
+}
+
+void CopyMainhandItemCommand::execute(const CommandOrigin &origin, CommandOutput &output) {
+
+	auto selectedSources = this->source.results(origin);
+	auto selectedRecipients = this->recipient.results(origin);
+
+	if (selectedSources.empty() || selectedRecipients.empty()) {
+		output.error("No targets matched either selector");
+		return;
+	}
+	if (selectedSources.count() > 1) {
+		output.error("Too many targets matched source selector");
+		return;
+	}
+
+	auto sourcePlayer = *selectedSources.begin();
+	if (!sourcePlayer->getSelectedItem()) {
+		output.error("Invalid item in source selector mainhand");
+		return;
+	}
+
+	for (auto tempRecipient : selectedRecipients) {
+		if (sourcePlayer != tempRecipient) {
+			this->copyMainhandItem(*sourcePlayer, *tempRecipient, output);
+		}
+	}
+
+	int32_t resultCount = selectedRecipients.count();
+	std::string successStr = "Successfully copied the mainhand contents from " + sourcePlayer->mPlayerName +
+		" to " + std::to_string(resultCount) + std::string((resultCount == 1) ? " player" : " players");
+	output.success(successStr);
+}
+
+void CopyMainhandItemCommand::setup(CommandRegistry *registry) {
+	using namespace commands;
+
+	registry->registerCommand("copymainhanditem", "Copies a player's mainhand item.",
+		CommandPermissionLevel::GameMasters, CommandFlagUsage, CommandFlagNone);
+
+	registry->registerOverload<CopyMainhandItemCommand>("copymainhanditem",
+		mandatory(&CopyMainhandItemCommand::source, "source"),
+		mandatory(&CopyMainhandItemCommand::recipient, "recipient"),
+		optional(&CopyMainhandItemCommand::dropItemIfNeeded, "dropItemIfNeeded")
+	);
+};
